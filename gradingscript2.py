@@ -28,6 +28,7 @@ import argparse
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -48,6 +49,7 @@ DEFAULT_GL_PASS = "tartans@1"
 EXPECTED_FILES = ["README.md", "models.py", "database.py", "utils.py", "main.py"]
 MAX_BLOB_BYTES = 2_000_000
 POINTS_PER_CHECK = 10
+CLONE_TIMEOUT_SECS = 30
 # ---------------------------------------------------------------------------
 
 
@@ -181,8 +183,33 @@ def server_checks(repo, remote_url, token):
                    GL_USER=os.environ.get("GL_USER", DEFAULT_GL_USER),
                    GL_PASS=os.environ.get("GL_PASS", DEFAULT_GL_PASS))
         mirror = os.path.join(tmp, "server.git")
-        r = subprocess.run(["git", "-c", "credential.helper=", "clone", "--bare", "-q",
-                            remote_url, mirror], capture_output=True, env=env)
+        # Run the clone in its own process group, with output sent to files. A plain
+        # subprocess.run(timeout=...) can still hang because git's helper processes
+        # keep the output pipes open after the parent git is killed.
+        errfile = os.path.join(tmp, "clone.err")
+        cmd = ["git", "-c", "credential.helper=",
+               "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=15",
+               "clone", "--bare", "-q", remote_url, mirror]
+        with open(errfile, "wb") as ef:
+            proc = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=ef,
+                                    start_new_session=True)
+            try:
+                proc.wait(timeout=CLONE_TIMEOUT_SECS)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:  # noqa
+                    proc.kill()
+                proc.wait()
+                return [("server: could clone the shared repo", False,
+                         f"timed out after {CLONE_TIMEOUT_SECS}s (server unreachable?)")]
+        with open(errfile, "rb") as ef:
+            clone_err = ef.read().decode(errors="replace").strip()[-200:]
+
+        class r:  # minimal result holder used below
+            returncode = proc.returncode
+            stderr = clone_err.encode()
         if r.returncode != 0:
             return [("server: could clone the shared repo", False,
                      r.stderr.decode(errors="replace").strip()[-200:])]
