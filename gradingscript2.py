@@ -12,7 +12,8 @@ Nothing here depends on commit hashes. It inspects CONTENT:
     branch tips match the student's local branch tips (i.e. they force-pushed)?
 
 Usage (run on coworker-2 as the student, after the student finishes Step 3):
-    python3 grade_check2.py
+    GL_USER=coworker2 GL_PASS='tartans@1' python3 grade_check2.py
+    (without GL_USER/GL_PASS the server checks are skipped)
 
 Options:
     --repo PATH            local repo (default ~/project)
@@ -42,9 +43,6 @@ SECRET_MARKERS = [b"NotARealPassword123", b"AIAFAKEDBPASS", b"super-secret-key-1
 EXPECTED_REMOTE = "http://10.9.8.60/aiaclass/project.git"
 GITLAB_PROJECT_PATH = "aiaclass/project"
 REQUIRED_BRANCH = "master"
-# Credentials used to clone the shared repo (override with GL_USER / GL_PASS env vars).
-DEFAULT_GL_USER = "coworker2"
-DEFAULT_GL_PASS = "tartans@1"
 # Legit files that must survive the rewrite (proves history wasn't just wiped).
 EXPECTED_FILES = ["README.md", "models.py", "database.py", "utils.py", "main.py"]
 MAX_BLOB_BYTES = 2_000_000
@@ -177,11 +175,13 @@ def local_checks(repo, require_revert):
 
 def server_checks(repo, remote_url, token):
     results = []
+    user, pw = os.environ.get("GL_USER"), os.environ.get("GL_PASS")
+    if not user or not pw:
+        return []  # no credentials provided: skip server checks, nothing recorded
     tmp = tempfile.mkdtemp(prefix="gradecheck_")
     try:
         env = dict(os.environ, GIT_ASKPASS=make_askpass(tmp), GIT_TERMINAL_PROMPT="0",
-                   GL_USER=os.environ.get("GL_USER", DEFAULT_GL_USER),
-                   GL_PASS=os.environ.get("GL_PASS", DEFAULT_GL_PASS))
+                   GL_USER=user, GL_PASS=pw)
         mirror = os.path.join(tmp, "server.git")
         # Run the clone in its own process group, with output sent to files. A plain
         # subprocess.run(timeout=...) can still hang because git's helper processes
