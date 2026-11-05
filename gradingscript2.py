@@ -12,7 +12,7 @@ Nothing here depends on commit hashes. It inspects CONTENT:
     branch tips match the student's local branch tips (i.e. they force-pushed)?
 
 Usage (run on coworker-2 as the student, after the student finishes Step 3):
-    GL_USER=coworker2 GL_PASS='tartans@1' python3 grade_check2.py
+    python3 grade_check2.py
 
 Options:
     --repo PATH            local repo (default ~/project)
@@ -20,7 +20,9 @@ Options:
     --skip-server          only grade the local repo
     --skip-revert-check    don't require evidence of the Step 1 revert commit
     --token TOKEN          optional GitLab API token; also checks master was re-protected
-Exit code 0 = all checks passed, 1 = at least one failed.
+
+Only failures and the final score are printed.
+Exit code 0 = full score, 1 = at least one check failed.
 """
 import argparse
 import os
@@ -39,9 +41,13 @@ SECRET_MARKERS = [b"NotARealPassword123", b"AIAFAKEDBPASS", b"super-secret-key-1
 EXPECTED_REMOTE = "http://10.9.8.60/aiaclass/project.git"
 GITLAB_PROJECT_PATH = "aiaclass/project"
 REQUIRED_BRANCH = "master"
+# Credentials used to clone the shared repo (override with GL_USER / GL_PASS env vars).
+DEFAULT_GL_USER = "coworker2"
+DEFAULT_GL_PASS = "tartans@1"
 # Legit files that must survive the rewrite (proves history wasn't just wiped).
 EXPECTED_FILES = ["README.md", "models.py", "database.py", "utils.py", "main.py"]
 MAX_BLOB_BYTES = 2_000_000
+POINTS_PER_CHECK = 10
 # ---------------------------------------------------------------------------
 
 
@@ -169,14 +175,11 @@ def local_checks(repo, require_revert):
 
 def server_checks(repo, remote_url, token):
     results = []
-    user, pw = os.environ.get("GL_USER"), os.environ.get("GL_PASS")
-    if not user or not pw:
-        return [("server: credentials provided (set GL_USER and GL_PASS)", False, "missing")]
-
     tmp = tempfile.mkdtemp(prefix="gradecheck_")
     try:
         env = dict(os.environ, GIT_ASKPASS=make_askpass(tmp), GIT_TERMINAL_PROMPT="0",
-                   GL_USER=user, GL_PASS=pw)
+                   GL_USER=os.environ.get("GL_USER", DEFAULT_GL_USER),
+                   GL_PASS=os.environ.get("GL_PASS", DEFAULT_GL_PASS))
         mirror = os.path.join(tmp, "server.git")
         r = subprocess.run(["git", "-c", "credential.helper=", "clone", "--bare", "-q",
                             remote_url, mirror], capture_output=True, env=env)
@@ -232,12 +235,17 @@ def main():
     if not args.skip_server:
         results += server_checks(args.repo, args.remote_url, args.token)
 
-    failed = 0
+    total_possible = POINTS_PER_CHECK * len(results)
+    current_points = 0
     for name, ok, detail in results:
-        print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  -> {detail}" if detail and not ok else ""))
-        failed += (not ok)
-    print(f"\n{len(results) - failed}/{len(results)} checks passed")
-    sys.exit(1 if failed else 0)
+        if ok:
+            current_points += POINTS_PER_CHECK
+        else:
+            print(f"FAIL: {name}" + (f" -> {detail}" if detail else ""))
+
+    print("\n=== Final Result ===")
+    print(f"Total Points: {current_points}/{total_possible}")
+    sys.exit(0 if current_points == total_possible else 1)
 
 
 if __name__ == "__main__":
