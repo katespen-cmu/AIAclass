@@ -17,7 +17,7 @@ QUESTIONS = [
     (
         'What is the value of DB_PASSWORD in the leaked commit?',
         'c0cf2bc558e28818',
-        '9ce9f42cef7d05673da03b33cdde0eb9722a3b9c35c9d246f2468d18a2879598',
+        '39167cbc035bdfc7321a7c643bba46a3d06ab504f30bd60ef992e491a42b5af3',
     ),
     (
         'What is the value of SECRET_KEY in the leaked commit?',
